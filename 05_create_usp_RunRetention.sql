@@ -5,6 +5,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+    DECLARE @RunStart DATETIME2 = SYSUTCDATETIME();
 
     DECLARE @LockId INT, @ConfigId INT, @LogId INT;
     DECLARE @DBName SYSNAME, @SchemaName SYSNAME, @TableName SYSNAME, @DateColumn SYSNAME;
@@ -85,6 +86,20 @@ BEGIN
     EXEC sp_releaseapplock @Resource='Maintenance_RunRetention', @LockOwner='Session';  -- VŽDY
 
     IF @HadError = 1                                        -- ať job spadne a spustí alert
-        THROW 50000, 'Retention: aspoň jeden config selhal.', 1;
+        BEGIN
+            DECLARE @mailQuery NVARCHAR(MAX) =
+            N'SELECT ConfigId, Status, ErrorMessage
+            FROM DBA.Maintenance.RetentionLog
+            WHERE Status = ''Error''
+                AND StartTime >= ''' + CONVERT(NVARCHAR(30), @RunStart, 126) + N'''';
+            -- 1) pošli detailní mail (které configy selhaly)
+            EXEC msdb.dbo.sp_send_dbmail
+                @profile_name = N'HomeMonitoringAlerts',
+                @recipients   = N'email@email.com',
+                @subject      = N'Retention FAILED',
+                @query        = @mailQuery;
+            -- 2) pak THROW, ať job zůstane v historii červený
+            THROW 50000, 'Retention: aspoň jeden config selhal.', 1;
+END
 END
 GO

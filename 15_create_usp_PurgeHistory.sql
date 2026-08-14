@@ -2,13 +2,13 @@ USE [DBA]
 GO
 
 CREATE OR ALTER PROCEDURE [Maintenance].[usp_PurgeHistory]
-    @jobHisstoryDays INT = 30,
+    @jobHistoryDays INT = 30,
     @backupHistoryDays INT = 30
 AS
 BEGIN
     
     SET NOCOUNT ON;
-    DECLARE @jobCut DATETIME = DATEADD(DAY, -@jobHisstoryDays, GETDATE());
+    DECLARE @jobCut DATETIME = DATEADD(DAY, -@jobHistoryDays, GETDATE());
     DECLARE @backupCut DATETIME = DATEADD(DAY, -@backupHistoryDays, GETDATE());
 
     -- Purge Job History

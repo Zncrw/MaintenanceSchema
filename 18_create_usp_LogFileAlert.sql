@@ -17,15 +17,13 @@ BEGIN TRY
     -- Tresholds
     DECLARE @warningTreshold DECIMAL (5,2) = 75.0;
     DECLARE @criticalTreshold DECIMAL (5,2) = 90.0;
+    
     DECLARE @ErrorMessage NVARCHAR(MAX);
 
 
-    -- Smycka begin pro Vytvoreni temp tabulky a vlozeni dat z DBCC SQLPERF(LOGSPACE)
-
+    --Vytvoreni temp tabulky a vlozeni dat z DBCC SQLPERF(LOGSPACE)
     CREATE TABLE #LogSpace (DatabaseName SYSNAME, LogSizeMB FLOAT, LogSpaceUsedPct FLOAT, Status INT);
     INSERT INTO #LogSpace  EXEC ('DBCC SQLPERF(LOGSPACE)');
-
-    -- Konec smyscky pro temp a vlozeni dat z DBCC SQLPERF(LOGSPACE)
 
     -- Get Previous AlertState for each database
     IF OBJECT_ID('tempdb..#PreviousAlerts') IS NOT NULL
@@ -69,10 +67,8 @@ BEGIN TRY
     CASE WHEN f.max_size NOT IN (-1, 268435456)
          THEN ROUND(s.LogSizeMB * 100.0 / (f.max_size * 8.0 / 1024.0), 2)
     END
-)) AS calc(PctOfMax)
-        WHERE f.type_desc = 'LOG'
-        
-        -- Smycka begin pro vlozeni dat do cilove tabulky LogSpaceLog
+        )) AS calc(PctOfMax)
+    WHERE f.type_desc = 'LOG'
 
         INSERT INTO Maintenance.LogSpaceLog (DBName, LogUsedPercent, LogSizeMB, LogUsedMB, MaxSizeMB, PctOfMax, LogReuseWait, AlertState)
         SELECT 
@@ -116,10 +112,8 @@ BEGIN CATCH
     THROW;
     
 END CATCH;
--- Konec vnejsi smycky pro transakci
 
 -- Alerting logic: Compare current and previous alert states, send email if state changed and is not 'Normal'
-
 IF OBJECT_ID('tempdb..#AlertsToSend') IS NOT NULL
     DROP TABLE #AlertsToSend;
 SELECT

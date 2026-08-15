@@ -48,17 +48,67 @@ BEGIN
                    + @rows + N'</table>';
 
     -- SEKCE 3: transaction log za posledních 7 dní
-    SELECT @rows = CONVERT(NVARCHAR(MAX),
-            CONCAT('<tr><td>',  CAST(AVG(CAST(LogUsedMB AS DECIMAL(10,2))) AS DECIMAL(10,2)),
-                   '</td><td>', MAX(LogUsedMB),
-                   '</td><td>', SUM(CASE WHEN AlertState <> 'NORMAL' THEN 1 ELSE 0 END),
-                   '</td></tr>'))
-    FROM HomeMonitoring.PiHole.LogFileMonitoring
-    WHERE CreatedAt >= DATEADD(DAY, -7, SYSUTCDATETIME());
-
-    SET @body += N'<h3>3) Transaction log (7 dní)</h3>'
-               + @tbl + N'<tr><th>Avg Used MB</th><th>Max Used MB</th><th>Alerty (mimo NORMAL)</th></tr>'
-               + @rows + N'</table>';
+        ;WITH Latest AS
+    (
+        SELECT
+            DBName,
+            LogSizeMB,
+            LogUsedMB,
+            LogUsedPercent,
+            MaxSizeMB,
+            PctOfMax,
+            LogReuseWait,
+            AlertState,
+            ROW_NUMBER() OVER
+            (
+                PARTITION BY DBName
+                ORDER BY CreatedAt DESC
+            ) AS rn
+        FROM DBA.Maintenance.LogSpaceLog
+    ),
+    Peak AS
+    (
+        SELECT
+            DBName,
+            MAX(PctOfMax)        AS MaxPctOfMax7d,
+            MAX(LogUsedPercent)  AS MaxUsedPct7d,
+            SUM(CASE WHEN AlertState <> 'Normal' THEN 1 ELSE 0 END) AS AlertCount7d
+        FROM DBA.Maintenance.LogSpaceLog
+        WHERE CreatedAt >= DATEADD(DAY,-7,SYSUTCDATETIME())
+        GROUP BY DBName
+    )
+    SELECT
+        @rows = STRING_AGG(
+            CONVERT(NVARCHAR(MAX),
+                CONCAT(
+                    '<tr>',
+                    '<td>', l.DBName, '</td>',
+                    '<td>', l.LogUsedMB, '</td>',
+                    '<td>', l.LogUsedPercent, '%</td>',
+                    '<td>', ISNULL(CONVERT(VARCHAR(20),p.MaxPctOfMax7d),'N/A'), '%</td>',
+                    '<td>', p.AlertCount7d, '</td>',
+                    '<td>', l.AlertState, '</td>',
+                    '</tr>'
+                )
+            ),
+            ''
+        )
+    FROM Latest l
+    JOIN Peak p
+        ON p.DBName = l.DBName
+    WHERE l.rn = 1;
+    SET @body += N'<h3>3) Transaction Log (7 dní)</h3>'
+            + @tbl
+            + N'<tr>
+                        <th>Database</th>
+                        <th>Used MB</th>
+                        <th>Used %</th>
+                        <th>Peak % Of Max (7d)</th>
+                        <th>Alerts (7d)</th>
+                        <th>Current State</th>
+                </tr>'
+            + @rows
+            + N'</table>';
 
     -- SEKCE 4: velikost databází
     SELECT @rows = STRING_AGG(CONVERT(NVARCHAR(MAX),
@@ -75,6 +125,23 @@ BEGIN
                + @tbl + N'<tr><th>Database</th><th>Total MB</th></tr>'
                + @rows + N'</table>';
 
+-- SEKCE 5: index maintenance za 7 dní
+    SELECT @rows = STRING_AGG(CONVERT(NVARCHAR(MAX),
+            CONCAT('<tr><td>', CONCAT(DbName,'.',SchemaName,'.',TableName),
+                   '</td><td>', IndexName,
+                   '</td><td>', Operation,
+                   '</td><td>', FragmentationPercent,
+                   '</td><td>', Status,
+                   '</td></tr>')), '')
+    FROM DBA.Maintenance.IndexMaintenanceLog
+    WHERE StartTime >= DATEADD(DAY, -7, SYSUTCDATETIME());
+
+    SET @body += N'<h3>5) Index maintenance (7 dní)</h3>';
+    IF @rows IS NULL
+        SET @body += N'<p>Nic se nedělalo (indexy zdravé) ✅</p>';
+    ELSE
+        SET @body += @tbl + N'<tr><th>Target</th><th>Index</th><th>Operace</th><th>Frag %</th><th>Status</th></tr>'
+                   + @rows + N'</table>';
     -- Odeslání
     EXEC msdb.dbo.sp_send_dbmail
         @profile_name = N'HomeMonitoringAlerts',
